@@ -1676,12 +1676,12 @@ class SessionManager:
         api_field = next((f for f in d.fields if f.key == "api_key"), None)
         if d.needs_key and api_field is not None and api_field.required and not api_key:
             return {"ok": False, "error": "Enter an API key to test."}
-        if d.needs_key and api_field is None:
-            # Multi-field cloud providers (Bedrock): required fields must be present;
-            # actual credentials may be ambient (~/.aws, env) and are checked by the call.
-            missing = [f.label for f in d.fields if f.required and not merged.get(f.key)]
-            if missing:
-                return {"ok": False, "error": "missing: " + ", ".join(missing)}
+        # Required non-secret fields must be present before the live call (the generic
+        # OpenAI-compatible endpoint; Bedrock region; Vertex project/location). Optional
+        # fields and ambient credentials are resolved by the call itself.
+        missing = [f.label for f in d.fields if f.required and not merged.get(f.key)]
+        if missing:
+            return {"ok": False, "error": "missing: " + ", ".join(missing)}
         return verify_provider_key(
             name, api_key=api_key, base_url=merged.get("base_url", ""), fields=merged
         )
