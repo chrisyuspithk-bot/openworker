@@ -124,7 +124,17 @@ export function useProviderSetup(opts?: { onSaved?: () => void }): ProviderSetup
   }, []);
 
   const info = providers.find((p) => p.name === sel);
-  const credentialed = !!info?.configured && !!info?.needs_key;
+  // "Credentialed" = configured AND a key is actually present. The generic
+  // OpenAI-compatible card has an OPTIONAL key: an endpoint-only config is configured but
+  // has no stored key, so it must not show the masked key placeholder (key_set_at is only
+  // stamped when a key is saved).
+  const apiKeyOptional = (info?.fields || []).some(
+    (f) => f.key === "api_key" && !f.required,
+  );
+  const credentialed =
+    !!info?.configured &&
+    !!info?.needs_key &&
+    (!apiKeyOptional || !!info?.key_set_at);
 
   const openProvider = (name: string) => {
     const p = providers.find((x) => x.name === name);
@@ -336,10 +346,11 @@ export function ProviderForm({
           Object.entries(f.show_when).every(([k, v]) => (ps.fields[k] || "") === v),
       )
     : [];
-  // Without a choice control, Test lives next to the required secret (the API key), or
-  // the first field for keyless providers (Ollama's Detect).
-  const requiredSecret = fieldsAll.find((x) => x.secret && x.required);
-  const testKey = requiredSecret ? requiredSecret.key : fieldsAll[0]?.key;
+  // Without a choice control, Test lives next to the secret credential — the API key for
+  // keyed providers, even an optional one (the generic OpenAI-compatible card keeps the
+  // key as its save path), or the first field for keyless providers (Ollama's Detect).
+  const secretField = fieldsAll.find((x) => x.secret);
+  const testKey = secretField ? secretField.key : fieldsAll[0]?.key;
   if (!sel) return null;
 
   const fieldRow = (f: ProviderFieldT, testable: boolean) => (
