@@ -19,10 +19,11 @@ from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 # Origins allowed to talk to the local sidecar. It binds to 127.0.0.1, but a page in the
 # user's own browser can still reach loopback — so without an origin gate, any website they
@@ -39,9 +40,32 @@ _ALLOWED_ORIGIN_RE = re.compile(
 )
 
 
-def _origin_allowed(origin: str | None) -> bool:
-    """True if a browser Origin may use the API. Missing Origin (non-browser) passes."""
-    return origin is None or bool(_ALLOWED_ORIGIN_RE.match(origin))
+def _origin_allowed(origin: str | None, host: str | None = None) -> bool:
+    """True if a browser Origin may use the API.
+
+    Missing Origin (curl, native clients, tests, server-to-server) passes — the gate
+    targets browsers, which always attach an unforgeable Origin. The pinned desktop/
+    localhost origins pass, and so does a same-origin request (the page was served by
+    this very server) so a hosted deployment can drive its own WS API without opening
+    the door to arbitrary cross-origin sites.
+    """
+    if origin is None:
+        return True
+    if _ALLOWED_ORIGIN_RE.match(origin):
+        return True
+    if host:
+        try:
+            origin_host = urlsplit(origin).hostname
+            request_host = urlsplit(f"//{host}").hostname
+            if (
+                origin_host
+                and request_host
+                and origin_host.lower() == request_host.lower()
+            ):
+                return True
+        except ValueError:
+            pass
+    return False
 
 
 # Caps on inbound WebSocket traffic. The loopback socket is unauthenticated (any local
@@ -692,6 +716,17 @@ def create_app(manager: SessionManager) -> FastAPI:
     @app.get("/v1/sessions/{session_id}/artifacts/read")
     def session_artifact_read(session_id: str, path: str) -> dict[str, Any]:
         return manager.read_artifact(session_id, path)
+
+    @app.get("/v1/sessions/{session_id}/artifacts/download")
+    def session_artifact_download(session_id: str, path: str):
+        info = manager.download_artifact(session_id, path)
+        if not info.get("ok"):
+            return JSONResponse(info, status_code=404)
+        return FileResponse(
+            info["path"],
+            filename=info["filename"],
+            media_type="application/octet-stream",
+        )
 
     @app.post("/v1/sessions/{session_id}/artifacts/reveal")
     def session_artifact_reveal(session_id: str, body: dict) -> dict[str, Any]:
@@ -1568,7 +1603,7 @@ def create_app(manager: SessionManager) -> FastAPI:
         # CORS never gates WebSockets, so a cross-site page could otherwise open this socket
         # and drive the session into tool calls. Reject a disallowed browser Origin before
         # accepting the handshake (1008 = policy violation).
-        if not _origin_allowed(ws.headers.get("origin")):
+        if not _origin_allowed(ws.headers.get("origin"), ws.headers.get("host")):
             await ws.close(code=1008)
             return
         await ws.accept(subprotocol="openworker" if api_token else None)
@@ -2056,7 +2091,7 @@ def create_app(manager: SessionManager) -> FastAPI:
         if not _websocket_authenticated(ws):
             await ws.close(code=1008)
             return
-        if not _origin_allowed(ws.headers.get("origin")):
+        if not _origin_allowed(ws.headers.get("origin"), ws.headers.get("host")):
             await ws.close(code=1008)
             return
         await ws.accept(subprotocol="openworker" if api_token else None)

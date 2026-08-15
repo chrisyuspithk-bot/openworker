@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 // Emits the asset URL only; the worker itself loads lazily with the pdfjs chunk.
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import {
+  artifactDownloadUrl,
   getArtifacts,
   readArtifact,
   revealArtifact,
@@ -9,6 +10,7 @@ import {
   type ArtifactInfo,
 } from "../api";
 import type { TodoItem } from "../types";
+import { isTauri } from "../tauri";
 import { AccessSection } from "./AccessSection";
 import { Icon } from "./Icon";
 import { Markdown, OPEN_ARTIFACT_EVENT } from "./Markdown";
@@ -314,6 +316,8 @@ function ArtifactViewer({
   const isHtml = content?.kind === "html" && !content.error;
   // Best viewed in a real app: spreadsheets, PDFs, and Office docs (pptx/docx can't preview inline)
   const isApp = content?.kind === "sheet" || content?.kind === "pdf" || content?.kind === "office";
+  // Browser builds have no OS shell, so "Open in default app"/"Show in folder" become downloads.
+  const desktop = isTauri();
 
   return (
     <div className="artifact-viewer">
@@ -339,16 +343,27 @@ function ArtifactViewer({
               <Icon name="refresh" size={16} />
             </button>
           )}
-          {isApp && (
-            <button
-              className="artifact-icon-btn"
-              onClick={() => revealArtifact(sessionId, artifact.path, "open")}
-              aria-label="Open in default app"
-              title="Open in default app"
-            >
-              <Icon name="panelOpen" size={16} />
-            </button>
-          )}
+          {isApp &&
+            (desktop ? (
+              <button
+                className="artifact-icon-btn"
+                onClick={() => revealArtifact(sessionId, artifact.path, "open")}
+                aria-label="Open in default app"
+                title="Open in default app"
+              >
+                <Icon name="panelOpen" size={16} />
+              </button>
+            ) : (
+              <a
+                className="artifact-icon-btn"
+                href={artifactDownloadUrl(sessionId, artifact.path)}
+                download={artifact.name}
+                aria-label="Download"
+                title="Download"
+              >
+                <Icon name="download" size={16} />
+              </a>
+            ))}
           {/* Copy the ABSOLUTE path — the workspace-relative one is useless outside the app
               (tester catch 2026-07-12: it copied just "slack-connector-debug.md"). */}
           <button
@@ -359,14 +374,16 @@ function ArtifactViewer({
           >
             <Icon name="copy" size={16} />
           </button>
-          <button
-            className="artifact-icon-btn"
-            onClick={() => revealArtifact(sessionId, artifact.path, "reveal")}
-            aria-label="Show in folder"
-            title="Show in folder"
-          >
-            <Icon name="folder" size={16} />
-          </button>
+          {desktop && (
+            <button
+              className="artifact-icon-btn"
+              onClick={() => revealArtifact(sessionId, artifact.path, "reveal")}
+              aria-label="Show in folder"
+              title="Show in folder"
+            >
+              <Icon name="folder" size={16} />
+            </button>
+          )}
         </div>
       </div>
       <div className="artifact-preview">
@@ -411,11 +428,17 @@ function ArtifactViewer({
           </div>
         ) : content.kind === "office" ? (
           <div className="artifact-open-prompt">
-            <Icon name="panelOpen" size={28} />
+            <Icon name={desktop ? "panelOpen" : "download"} size={28} />
             <p>This {/\.pptx?$/i.test(artifact.name) ? "PowerPoint" : "Word"} file can’t be previewed here.</p>
-            <button className="btn sm" onClick={() => revealArtifact(sessionId, artifact.path, "open")}>
-              Open in default app
-            </button>
+            {desktop ? (
+              <button className="btn sm" onClick={() => revealArtifact(sessionId, artifact.path, "open")}>
+                Open in default app
+              </button>
+            ) : (
+              <a className="btn sm" href={artifactDownloadUrl(sessionId, artifact.path)} download={artifact.name}>
+                Download
+              </a>
+            )}
           </div>
         ) : (
           <pre className="artifact-code">{content.content}</pre>

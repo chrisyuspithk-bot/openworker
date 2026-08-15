@@ -9,7 +9,6 @@ import {
 } from "../../api";
 import { ConnectorBadge } from "../../connectors/ConnectorIcon";
 import { ConnectSetup } from "../ManageTabs";
-import { CloudSignInInline, CloudStatusPending } from "./CloudSignIn";
 import { PILL_ACCENT, PILL_LINE, TAG_ACCENT } from "./ui";
 
 // The ONE place a connection gets added (UX-DECISIONS §21): the detail page's header
@@ -37,13 +36,17 @@ export function AddConnectionModal({
   // with manual fields alongside (jira, asana) it's a second mode; alone (monday)
   // it IS the connect flow.
   const mcpBacked = !!c.mcp;
-  const twoModes =
+  const cloudManaged =
     c.name === "slack" ||
     c.name === "hubspot" ||
     c.name === "github" ||
     c.name === "notion" ||
-    c.name === "attio" ||
-    (mcpBacked && c.fields.length > 0);
+    c.name === "attio";
+  const signedIn = !!cloud?.signed_in;
+  // Account-less connect: cloud-managed one-click needs the OAuth broker, so signed
+  // out those connectors drop straight to manual. MCP-backed one-click is fully local
+  // (DCR against the vendor's MCP server) and stays available without any account.
+  const twoModes = (cloudManaged && signedIn) || (mcpBacked && c.fields.length > 0);
   const [pane, setPane] = useState<"one" | "manual">("one");
 
   useEffect(() => {
@@ -93,13 +96,13 @@ export function AddConnectionModal({
               mcpBacked ? (
                 <McpOneClick c={c} onConnected={() => { onChanged(); onClose(); }} />
               ) : c.name === "hubspot" ? (
-                <HubSpotOneClick c={c} cloud={cloud} />
+                <HubSpotOneClick c={c} />
               ) : c.name === "github" ? (
-                <GithubOneClick c={c} cloud={cloud} />
+                <GithubOneClick c={c} />
               ) : c.name === "slack" ? (
-                <SlackOneClick c={c} cloud={cloud} />
+                <SlackOneClick c={c} />
               ) : (
-                <GenericOneClick c={c} cloud={cloud} />
+                <GenericOneClick c={c} />
               )
             ) : c.name === "slack" ? (
               <SlackManual onConnected={() => { onChanged(); onClose(); }} />
@@ -174,7 +177,7 @@ function McpOneClick({ c, onConnected }: { c: Connector; onConnected: () => void
 
 // One-click pane for generic managed connectors (Notion, Attio, …): sign in
 // with the service in the browser; each consent lands as its own account.
-function GenericOneClick({ c, cloud }: { c: Connector; cloud: CloudStatus | null }) {
+function GenericOneClick({ c }: { c: Connector }) {
   const [waiting, setWaiting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const go = async () => {
@@ -189,20 +192,14 @@ function GenericOneClick({ c, cloud }: { c: Connector; cloud: CloudStatus | null
         Opens {c.title} in your browser — approve access there. No tokens typed; connect
         again with another account to add it alongside.
       </p>
-      {cloud?.signed_in ? (
-        <button
-          className={PILL_ACCENT + " w-full !py-2"}
-          data-testid="modal-generic-one-click"
-          onClick={go}
-          disabled={waiting}
-        >
-          {waiting ? "Check your browser…" : `Connect ${c.title}`}
-        </button>
-      ) : cloud ? (
-        <CloudSignInInline />
-      ) : (
-        <CloudStatusPending />
-      )}
+      <button
+        className={PILL_ACCENT + " w-full !py-2"}
+        data-testid="modal-generic-one-click"
+        onClick={go}
+        disabled={waiting}
+      >
+        {waiting ? "Check your browser…" : `Connect ${c.title}`}
+      </button>
       {error && <div className="text-[12.5px] text-danger">{error}</div>}
       <p className="text-[12px] text-faint text-center flex items-center justify-center gap-1.5">
         <span className={TAG_ACCENT}>Recommended</span> tokens stay on this computer
@@ -211,7 +208,7 @@ function GenericOneClick({ c, cloud }: { c: Connector; cloud: CloudStatus | null
   );
 }
 
-function SlackOneClick({ c, cloud }: { c: Connector; cloud: CloudStatus | null }) {
+function SlackOneClick({ c }: { c: Connector }) {
   const [waiting, setWaiting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const go = async () => {
@@ -226,15 +223,9 @@ function SlackOneClick({ c, cloud }: { c: Connector; cloud: CloudStatus | null }
         Opens Slack in your browser — approve @ocw for the workspace. No tokens; works for any
         number of workspaces.
       </p>
-      {cloud?.signed_in ? (
-        <button className={PILL_ACCENT + " w-full !py-2"} data-testid="modal-add-to-slack" onClick={go} disabled={waiting}>
-          {waiting ? "Check your browser…" : "Add to Slack"}
-        </button>
-      ) : cloud ? (
-        <CloudSignInInline />
-      ) : (
-        <CloudStatusPending />
-      )}
+      <button className={PILL_ACCENT + " w-full !py-2"} data-testid="modal-add-to-slack" onClick={go} disabled={waiting}>
+        {waiting ? "Check your browser…" : "Add to Slack"}
+      </button>
       {error && <div className="text-[12.5px] text-danger">{error}</div>}
       <p className="text-[12px] text-faint text-center flex items-center justify-center gap-1.5">
         <span className={TAG_ACCENT}>Recommended</span> relay · tokens stay on this computer
@@ -243,7 +234,7 @@ function SlackOneClick({ c, cloud }: { c: Connector; cloud: CloudStatus | null }
   );
 }
 
-function GithubOneClick({ c, cloud }: { c: Connector; cloud: CloudStatus | null }) {
+function GithubOneClick({ c }: { c: Connector }) {
   const [waiting, setWaiting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const go = async () => {
@@ -259,18 +250,9 @@ function GithubOneClick({ c, cloud }: { c: Connector; cloud: CloudStatus | null 
         installation links right up; otherwise you'll pick an account and repos. No tokens
         typed; the agent acts as ocw-agent[bot].
       </p>
-      {cloud?.signed_in ? (
-        /* One button: the broker is authorize-first — it links an existing installation or
-           redirects the same tab on to the install page (the old "Already installed? Link
-           it" question and the Configure dead-end are gone). */
-        <button className={PILL_ACCENT + " w-full !py-2"} data-testid="modal-install-github-app" onClick={() => go()} disabled={waiting}>
-          {waiting ? "Check your browser…" : "Connect GitHub"}
-        </button>
-      ) : cloud ? (
-        <CloudSignInInline />
-      ) : (
-        <CloudStatusPending />
-      )}
+      <button className={PILL_ACCENT + " w-full !py-2"} data-testid="modal-install-github-app" onClick={() => go()} disabled={waiting}>
+        {waiting ? "Check your browser…" : "Connect GitHub"}
+      </button>
       {error && <div className="text-[12.5px] text-danger">{error}</div>}
       <p className="text-[12px] text-faint text-center flex items-center justify-center gap-1.5">
         <span className={TAG_ACCENT}>Recommended</span> relay · short-lived tokens, never stored
@@ -279,7 +261,7 @@ function GithubOneClick({ c, cloud }: { c: Connector; cloud: CloudStatus | null 
   );
 }
 
-function HubSpotOneClick({ c, cloud }: { c: Connector; cloud: CloudStatus | null }) {
+function HubSpotOneClick({ c }: { c: Connector }) {
   const [access, setAccess] = useState<"read" | "write">("read");
   const [waiting, setWaiting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -318,15 +300,9 @@ function HubSpotOneClick({ c, cloud }: { c: Connector; cloud: CloudStatus | null
           </label>
         ))}
       </div>
-      {cloud?.signed_in ? (
-        <button className={PILL_ACCENT + " w-full !py-2"} data-testid="modal-connect-hubspot" onClick={go} disabled={waiting}>
-          {waiting ? "Check your browser…" : "Connect HubSpot"}
-        </button>
-      ) : cloud ? (
-        <CloudSignInInline />
-      ) : (
-        <CloudStatusPending />
-      )}
+      <button className={PILL_ACCENT + " w-full !py-2"} data-testid="modal-connect-hubspot" onClick={go} disabled={waiting}>
+        {waiting ? "Check your browser…" : "Connect HubSpot"}
+      </button>
       {error && <div className="text-[12.5px] text-danger">{error}</div>}
       <p className="text-[12px] text-faint text-center">
         Works for any number of portals · tokens stay on this computer

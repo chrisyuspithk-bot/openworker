@@ -1401,6 +1401,15 @@ class SessionManager:
             "truncated": len(text) > 500000,
         }
 
+    def download_artifact(self, session_id: str, path: str) -> dict[str, Any]:
+        """Resolve an artifact to a downloadable file. Browser deployments can't use
+        `reveal_artifact` (no OS shell on the client), so this returns the absolute
+        filesystem path for a `FileResponse` instead."""
+        target, err = self._artifact_target(session_id, path, allow_dir=False)
+        if target is None:
+            return {"ok": False, "error": err}
+        return {"ok": True, "path": str(target), "filename": target.name}
+
     def reveal_artifact(
         self, session_id: str, path: str, mode: str = "reveal"
     ) -> dict[str, Any]:

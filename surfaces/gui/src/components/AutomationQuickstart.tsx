@@ -1,11 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  cloudLogin,
   connectManaged,
   getCloudStatus,
   getConnectors,
   getRecentChannels,
-  waitForCloudSignIn,
   type CloudStatus,
   type Connector,
   type RecentChannel,
@@ -171,7 +169,6 @@ export function AutomationQuickstart({
   const [connFlow, setConnFlow] = useState<{ name: string; phase: "opening" | "waiting" } | null>(
     null,
   );
-  const [signinPhase, setSigninPhase] = useState<"opening" | "waiting" | null>(null);
   const [recent, setRecent] = useState<RecentChannel[]>([]);
   const [repo, setRepo] = useState("");
   const [channel, setChannel] = useState("");
@@ -246,35 +243,6 @@ export function AutomationQuickstart({
     // The POST resolves once the system browser is off; the poll ends the waiting state.
     setConnFlow((f) => (f?.name === name ? { name, phase: "waiting" } : f));
     refresh();
-  };
-
-  const signinPollRef = useRef<(() => void) | null>(null);
-  const cancelSignin = () => {
-    signinPollRef.current?.();
-    signinPollRef.current = null;
-    setSigninPhase(null);
-  };
-  useEffect(() => cancelSignin, []); // never leave the poll running after unmount
-
-  const signInThenConnect = async () => {
-    setSigninPhase("opening");
-    await cloudLogin().catch(() => {});
-    setSigninPhase("waiting");
-    // Poll until the browser flow lands, then finish the pending connect (bounded).
-    signinPollRef.current = waitForCloudSignIn(async (s) => {
-      signinPollRef.current = null;
-      setSigninPhase(null);
-      if (!s?.signed_in) return;
-      setCloud(s);
-      if (pendingConn) {
-        const name = pendingConn;
-        setConnFlow({ name, phase: "opening" });
-        await connectManaged(name).catch(() => {});
-        setConnFlow((f) => (f?.name === name ? { name, phase: "waiting" } : f));
-        setPendingConn(null);
-        refresh();
-      }
-    });
   };
 
   const create = () => {
@@ -431,39 +399,11 @@ export function AutomationQuickstart({
               data-testid="ob-cloudpane"
             >
               <span className="block text-[13px] text-ink font-medium">
-                One sign-in unlocks every one-click connection
+                Connect {connState(pendingConn)?.title || pendingConn} manually first
               </span>
-              Connections are brokered by OpenWorker Cloud — your tokens stay on this computer.
-              <div className="flex items-center gap-3 mt-2">
-                {signinPhase ? (
-                  <>
-                    <span className="inline-flex items-center gap-2 text-[12px]">
-                      <Spinner />
-                      {signinPhase === "opening" ? "Opening browser…" : "Waiting for sign-in…"}
-                    </span>
-                    {signinPhase === "waiting" && (
-                      <span className="text-[11.5px] text-faint">
-                        Finish signing in in your browser — this page updates by itself.{" "}
-                        <button
-                          className="underline hover:text-muted"
-                          onClick={cancelSignin}
-                          data-testid="ob-signin-cancel"
-                        >
-                          Cancel
-                        </button>
-                      </span>
-                    )}
-                  </>
-                ) : (
-                  <button
-                    className="px-3.5 py-1 rounded-full border border-line text-[12.5px] text-accent hover:bg-panel"
-                    onClick={signInThenConnect}
-                    data-testid="ob-cloud-signin"
-                  >
-                    Sign in to OpenWorker Cloud
-                  </button>
-                )}
-              </div>
+              One-click connections are brokered by OpenWorker Cloud. To keep this
+              automation fully local, open Connectors and connect{" "}
+              {connState(pendingConn)?.title || pendingConn} with a token, then return here.
             </div>
           )}
 

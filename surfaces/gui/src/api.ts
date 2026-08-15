@@ -224,6 +224,12 @@ export async function revealArtifact(
   return res.json();
 }
 
+/** Absolute URL that serves an artifact as a file download (browser builds have no OS shell). */
+export function artifactDownloadUrl(sessionId: string, path: string): string {
+  const q = new URLSearchParams({ path });
+  return `${httpBase()}/v1/sessions/${encodeURIComponent(sessionId)}/artifacts/download?${q.toString()}`;
+}
+
 // -- session roots (orphan Cowork: scratch + added folders) -------------------
 export interface RootInfo {
   path: string;

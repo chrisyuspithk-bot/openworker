@@ -4,6 +4,17 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OpenWorker</title>
+    <!-- Host-agnostic API/WS endpoint discovery for browser deployments. The desktop
+         shell injects __COWORKER_HTTP__/__COWORKER_WS__ itself, so only fall back when
+         they are absent. -->
+    <script>
+      window.__COWORKER_HTTP__ =
+        window.__COWORKER_HTTP__ || window.location.origin;
+      window.__COWORKER_WS__ =
+        window.__COWORKER_WS__ ||
+        (window.location.protocol === "https:" ? "wss://" : "ws://") +
+          window.location.host;
+    </script>
     <!-- Resolve the theme before first paint (no white flash for dark users).
          Must match src/theme.ts: key "openwork-theme", absent/invalid = auto = follow macOS. -->
     <script>
