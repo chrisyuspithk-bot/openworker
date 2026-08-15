@@ -188,6 +188,20 @@ def _build_ollama(profile: dict[str, Any], secrets: Any) -> ProviderClient:
     return OpenAIProvider(api_key="ollama", base_url=base_url)
 
 
+def _build_openai_compat(profile: dict[str, Any], secrets: Any) -> ProviderClient:
+    # Generic OpenAI-compatible endpoint: the endpoint is required, the key is optional
+    # (local servers like vLLM/LM Studio usually need none). The placeholder keeps the SDK
+    # client constructible when keyless AND stops it from falling back to OPENAI_API_KEY /
+    # provider:openai — that key must never be silently sent to a third-party endpoint.
+    base_url = ((profile or {}).get("base_url") or "").strip() or None
+    if not base_url:
+        raise RuntimeError(
+            "No OpenAI-compatible endpoint configured — add it in Settings ▸ Models."
+        )
+    api_key = ((profile or {}).get("api_key") or "").strip() or None
+    return OpenAIProvider(api_key=api_key or "openai-compat", base_url=base_url)
+
+
 def _openai_compat(vendor: str, default_base_url: str, env_key: Optional[str] = None):
     """Builder factory for vendors reached through their OpenAI-compatible API (Z AI, DeepSeek,
     Kimi, MiniMax, Qwen, xAI, Mistral). The key is resolved from the vendor's OWN profile (or its
@@ -550,6 +564,36 @@ DESCRIPTORS: list[ProviderDescriptor] = [
         recommended_model="z-ai/glm-5.2",
         env_key="OPENROUTER_API_KEY",
     ),
+    # Generic catch-all for any OpenAI-compatible server not covered by the first-class
+    # vendors above (OpenRouter/Together/Groq/vLLM/LM Studio/self-hosted proxies, …). The
+    # endpoint is the required primary field; the key is optional because local servers
+    # usually need none. `needs_key` stays True so the card renders as a Test-style provider,
+    # but an optional key means keyless endpoints still count as configured.
+    ProviderDescriptor(
+        name="openai_compat",
+        title="OpenAI-compatible",
+        needs_key=True,
+        fields=[
+            ProviderField(
+                "base_url",
+                "Endpoint",
+                secret=False,
+                required=True,
+                placeholder="https://your-host/v1",
+                help="Any OpenAI-compatible /v1 endpoint: OpenRouter, Groq, vLLM, LM Studio, a self-hosted proxy, …",
+            ),
+            ProviderField(
+                "api_key",
+                "API key (optional)",
+                secret=True,
+                required=False,
+                placeholder="sk-… (leave blank for local servers)",
+                help="Most hosted endpoints require a key; local servers (vLLM, LM Studio) usually don't.",
+            ),
+        ],
+        build=_build_openai_compat,
+        blurb="Connect any OpenAI-compatible server — paste its endpoint, add a key only if it needs one.",
+    ),
     ProviderDescriptor(
         name="ollama",
         title="Ollama (local models)",
@@ -598,11 +642,16 @@ def descriptor_configured(d: ProviderDescriptor, profile: dict[str, Any]) -> boo
     """Whether a provider is usable with the given stored profile. Single-key providers:
     a stored or env key. Multi-field cloud providers (no `api_key` field, e.g. Bedrock):
     every required field present — their actual credentials may be ambient (~/.aws, ADC).
+    A provider whose `api_key` is optional (the generic OpenAI-compatible endpoint) is
+    configured when its required fields (the endpoint) are present, key or not.
     """
     if not d.needs_key:
         return True  # keyless (Ollama) — usable out of the box
     profile = profile or {}
-    if any(f.key == "api_key" for f in d.fields):
+    api_field = next((f for f in d.fields if f.key == "api_key"), None)
+    if api_field is not None:
+        if not api_field.required:
+            return all(profile.get(f.key) for f in d.fields if f.required)
         return bool(profile.get("api_key")) or bool(
             d.env_key and os.environ.get(d.env_key)
         )
@@ -841,9 +890,12 @@ def verify_provider_key(
                 or default_base.rstrip("/")
                 or "https://api.openai.com/v1"
             )
+            # Omit the bearer header for keyless endpoints (vLLM/LM Studio/self-hosted);
+            # with a key present the header is what every hosted endpoint expects.
+            headers = {"Authorization": f"Bearer {key}"} if key else {}
             resp = httpx.get(
                 base + "/models",
-                headers={"Authorization": f"Bearer {key}"},
+                headers=headers,
                 timeout=timeout,
             )
     except Exception as exc:  # DNS/connection/timeout — never let it bubble to a 500

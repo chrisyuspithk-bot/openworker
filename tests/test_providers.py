@@ -338,6 +338,42 @@ def test_compat_builder_never_leaks_the_openai_key(monkeypatch):
         build_provider_client("kimi", {}, None)
 
 
+def test_generic_openai_compat_descriptor(monkeypatch):
+    """The generic OpenAI-compatible option: endpoint required, key optional (local
+    servers need none), and the OpenAI key is never silently reused as its key."""
+    import pytest
+
+    from coworker.providers.registry import (
+        build_provider_client,
+        descriptor_configured,
+        get_descriptor,
+    )
+
+    d = get_descriptor("openai_compat")
+    assert d is not None and d.needs_key
+    base = next(f for f in d.fields if f.key == "base_url")
+    key = next(f for f in d.fields if f.key == "api_key")
+    assert base.required and not base.secret and not base.default
+    assert not key.required and key.secret
+
+    # Endpoint gates configuration; a key is not required.
+    assert not descriptor_configured(d, {})
+    assert descriptor_configured(d, {"base_url": "http://localhost:8000/v1"})
+    assert descriptor_configured(
+        d, {"base_url": "http://localhost:8000/v1", "api_key": "sk-x"}
+    )
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-real")
+    p = build_provider_client(
+        "openai_compat", {"base_url": "http://localhost:8000/v1"}, None
+    )
+    assert p._base_url == "http://localhost:8000/v1"
+    assert p._api_key == "openai-compat"  # placeholder, never the OpenAI env key
+
+    with pytest.raises(RuntimeError, match="endpoint"):
+        build_provider_client("openai_compat", {}, None)
+
+
 def test_compat_models_route_and_get_tool_capabilities():
     from coworker.providers.router import ProviderRouter
 

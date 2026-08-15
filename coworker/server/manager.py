@@ -1673,10 +1673,10 @@ class SessionManager:
         api_key = merged.get("api_key", "")
         if not api_key and d.env_key:
             api_key = os.environ.get(d.env_key, "").strip()
-        has_key_field = any(f.key == "api_key" for f in d.fields)
-        if d.needs_key and has_key_field and not api_key:
+        api_field = next((f for f in d.fields if f.key == "api_key"), None)
+        if d.needs_key and api_field is not None and api_field.required and not api_key:
             return {"ok": False, "error": "Enter an API key to test."}
-        if d.needs_key and not has_key_field:
+        if d.needs_key and api_field is None:
             # Multi-field cloud providers (Bedrock): required fields must be present;
             # actual credentials may be ambient (~/.aws, env) and are checked by the call.
             missing = [f.label for f in d.fields if f.required and not merged.get(f.key)]
