@@ -1,0 +1,39 @@
+# fly.toml - OpenWorker on Fly.io (24/7 free tier)
+app = "openworker"
+primary_region = "nrt"
+
+[build]
+  dockerfile = "Dockerfile"
+
+# Configure HTTP service for 24/7 free tier
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false   # Keep machine running (not auto-stop)
+  auto_start_machines = true   # Restart if crashed
+  min_machines_running = 1     # Always keep 1 machine running
+  processes = ["app"]
+
+# Resource limits (stays within free tier)
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+# Environment variables (set secrets via `fly secrets set`)
+[env]
+  PORT = "8080"
+  # COWORKER_API_TOKEN = ""  # Optional: set via fly secrets set
+  # OPENAI_API_KEY = ""      # Set via fly secrets set
+  # ANTHROPIC_API_KEY = ""   # Set via fly secrets set
+
+# Optional: Add a health check
+[checks]
+  # HTTP health check on root path
+  [checks.http]
+    interval = "30s"
+    timeout = "10s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/"
+    port = 8080
